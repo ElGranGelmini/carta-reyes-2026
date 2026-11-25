@@ -19,9 +19,29 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install image extraction dependencies
+        run: python -m pip install requests beautifulsoup4 pillow
+      - name: Retrieve product photos before publishing
+        run: python scripts/fetch_images.py
+      - name: Image coverage report
+        shell: bash
+        run: |
+          echo "### Product image coverage" >> "$GITHUB_STEP_SUMMARY"
+          count=$(find images -maxdepth 1 -name '*.webp' | wc -l)
+          echo "$count of 24 product photographs retrieved." >> "$GITHUB_STEP_SUMMARY"
+          for n in $(seq -w 1 24); do
+            if [ ! -f "images/$n.webp" ]; then
+              echo "- Missing photograph: gift $n" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          echo "Saved $count photos."
       - name: Configure Pages
         uses: actions/configure-pages@v5
-      - name: Upload static site
+      - name: Upload site and downloaded photos
         uses: actions/upload-pages-artifact@v3
         with:
           path: .

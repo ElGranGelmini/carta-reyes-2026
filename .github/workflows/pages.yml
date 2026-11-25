@@ -2,6 +2,10 @@ name: Deploy Christmas wishlist to GitHub Pages
 on:
   push:
     branches: [main]
+    paths:
+      - index.html
+      - images/**
+      - .github/workflows/pages.yml
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,40 +15,49 @@ concurrency:
   group: pages
   cancel-in-progress: true
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      source: ${{ steps.source.outputs.mode }}
+    steps:
+      - name: Check configured Pages source
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mode=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.build_type')
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "Pages source: $mode" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$mode" = legacy ]; then
+            echo "GitHub handles branch deployment automatically; no duplicate deployment required." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$mode" != workflow ]; then
+            echo "Unexpected Pages source: $mode"
+            exit 1
+          fi
   deploy:
+    needs: check
+    if: needs.check.outputs.source == 'workflow'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install image extraction dependencies
-        run: python -m pip install requests beautifulsoup4 pillow
-      - name: Retrieve product photos before publishing
-        run: python scripts/fetch_images.py
-      - name: Image coverage report
-        shell: bash
+      - uses: actions/checkout@v4
+      - name: Prepare site using stored photographs
         run: |
-          echo "### Product image coverage" >> "$GITHUB_STEP_SUMMARY"
-          count=$(find images -maxdepth 1 -name '*.webp' | wc -l)
-          echo "$count of 24 product photographs retrieved." >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p _site/images
+          cp index.html _site/
+          if [ -d images ]; then cp -a images/. _site/images/; fi
+          echo "### Image coverage" >> "$GITHUB_STEP_SUMMARY"
           for n in $(seq -w 1 24); do
-            if [ ! -f "images/$n.webp" ]; then
-              echo "- Missing photograph: gift $n" >> "$GITHUB_STEP_SUMMARY"
+            if [ ! -f "_site/images/$n.webp" ]; then
+              echo "- Missing image: gift $n" >> "$GITHUB_STEP_SUMMARY"
             fi
           done
-          echo "Saved $count photos."
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-      - name: Upload site and downloaded photos
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
